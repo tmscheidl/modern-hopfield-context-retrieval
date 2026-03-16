@@ -28,3 +28,30 @@ modern-hopfield-context-retrieval
 │
 └── docs
     └── architecture.md
+
+
+Modern Hopfield Context Retrieval
+
+PyTorch implementation of a modular context-aware retrieval architecture using modern Hopfield networks, cross-attention, and similarity-based reasoning.
+
+This repository provides reusable neural modules for associative memory and context-based inference.
+
+Architecture
+
+The system consists of the following components:
+
+Context Module
+
+Aggregates information from a support set and enriches query representations.
+
+Cross-Attention Module
+
+Performs attention-based interaction between queries and contextual information.
+
+Similarity Module
+
+Computes similarity-based retrieval scores between query and support embeddings.
+
+Hopfield Memory
+
+Implements a modern Hopfield network for associative memory retrieval.
