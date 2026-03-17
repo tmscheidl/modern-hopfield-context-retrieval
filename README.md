@@ -1,57 +1,26 @@
-# modern-hopfield-context-retrieval
-Modular PyTorch implementation of context retrieval using modern Hopfield networks, cross-attention, and similarity modules.
+A modular deep learning architecture that combines:
 
+- Modern Hopfield Networks
+- Cross-Attention mechanisms
+- Context-based retrieval
+- Metric-based similarity learning
 
-The structure:
+The model is designed for few-shot learning scenarios, where predictions
+are made based on a support set of examples.
 
-modern-hopfield-context-retrieval
-│
-├── README.md
-├── LICENSE
-├── requirements.txt
-│
-├── models
-│   ├── hopfield
-│   │   └── my_hopfield.py
-│   │
-│   ├── context_module.py
-│   ├── cross_attention_module.py
-│   └── similarity_module.py
-│
-├── tests
-│   ├── test_hopfield.py
-│   ├── test_context_module.py
-│   └── test_similarity_module.py
-│
-├── examples
-│   └── example_usage.ipynb
-│
-└── docs
-    └── architecture.md
+## Architecture
 
+The pipeline consists of three main components:
 
-Modern Hopfield Context Retrieval
+1. Context Module
+   - Multi-step Hopfield retrieval
+   - Top-k memory selection
+   - Gated residual updates
 
-PyTorch implementation of a modular context-aware retrieval architecture using modern Hopfield networks, cross-attention, and similarity-based reasoning.
+2. Hopfield Memory
+   - Multi-head associative retrieval
+   - Learnable temperature (β)
+   - Energy-based convergence
 
-This repository provides reusable neural modules for associative memory and context-based inference.
-
-Architecture
-
-The system consists of the following components:
-
-Context Module
-
-Aggregates information from a support set and enriches query representations.
-
-Cross-Attention Module
-
-Performs attention-based interaction between queries and contextual information.
-
-Similarity Module
-
-Computes similarity-based retrieval scores between query and support embeddings.
-
-Hopfield Memory
-
-Implements a modern Hopfield network for associative memory retrieval.
+3. Similarity Module
+   - Computes prediction via similarity-weighted aggregation
