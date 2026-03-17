@@ -1,14 +1,10 @@
-import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from functools import partial
 
-PROJECT_ROOT = r"C:\Users\tom39\Desktop\MHNfs"
-sys.path.append(PROJECT_ROOT)
-
+# Import your Hopfield module relative to the repo root
 from hopfield.my_hopfield import MyHopfield
-#from mhnfs.modules import Hopfield # this is the original
 
 # -------------------------------------------------
 # Weight initialization
