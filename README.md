@@ -1,9 +1,9 @@
 A modular deep learning architecture combining:
 
 - Modern Hopfield Networks
-- Cross-Attention mechanisms
-- Context-based retrieval
-- Metric-based similarity learning
+- Cross-Attention Module
+- Context Module
+- Metric-based similarity Module
 
 Designed for few-shot learning, the model makes predictions based on a support set of examples and is tailored to handle active and inactive molecules.
 
