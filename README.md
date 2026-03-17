@@ -1,26 +1,38 @@
-A modular deep learning architecture that combines:
+A modular deep learning architecture combining:
 
 - Modern Hopfield Networks
 - Cross-Attention mechanisms
 - Context-based retrieval
 - Metric-based similarity learning
 
-The model is designed for few-shot learning scenarios, where predictions
-are made based on a support set of examples.
+Designed for few-shot learning, the model makes predictions based on a support set of examples and is tailored to handle active and inactive molecules.
 
 ## Architecture
 
 The pipeline consists of three main components:
 
-1. Context Module
-   - Multi-step Hopfield retrieval
-   - Top-k memory selection
-   - Gated residual updates
+Cross-Attention Module
 
-2. Hopfield Memory
-   - Multi-head associative retrieval
-   - Learnable temperature (β)
-   - Energy-based convergence
+- Converts self-attention into true cross-attention (query ≠ key/value) for better information flow.
+- Uses scaled dot-product attention with dropout for stability.
+- Adds active/inactive bias embeddings and gated residual connections for more precise updates.
 
-3. Similarity Module
-   - Computes prediction via similarity-weighted aggregation
+Context Module
+
+- Implements multi-step Hopfield retrieval to iteratively refine representations.
+- Includes top-k memory selection to focus on the most relevant support examples.
+- Uses learnable gating and FFN to improve feature aggregation and stability.
+- Normalizes embeddings and separates projections per type for cleaner computations.
+
+Hopfield Module
+
+- Supports multi-head associative retrieval with learnable temperature (β).
+- Includes residual connections, masking, and dropout for robustness.
+- Adds energy computation and iterative retrieval to ensure convergence.
+- Improved initialization and numerical stability for reliable training.
+
+Similarity Module
+
+Computes predictions via similarity-weighted aggregation of support set labels.
+
+This design ensures efficient, stable, and accurate few-shot predictions by combining retrieval-based memory, attention, and similarity scoring.
