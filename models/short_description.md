@@ -105,3 +105,6 @@ The improved version introduces a more **structured and stable retrieval process
 **Result:**  
 A more **stable, focused, and iterative context retrieval mechanism**, improving representation quality for few-shot learning.
 
+## Similarity Module
+
+It was nothing change at moment.
