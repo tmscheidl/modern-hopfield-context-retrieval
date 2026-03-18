@@ -24,3 +24,34 @@ Compared to the original implementation, the Cross-Attention module was redesign
 
 **Result:**  
 A more **stable, efficient, and task-aware attention mechanism**, better suited for few-shot molecular classification.
+
+
+### Context Module Improvements
+
+The original implementation performed a **single-step Hopfield retrieval over all embeddings**, using a simple residual update.  
+The improved version introduces a more **structured and stable retrieval process**.
+
+**Changes:**
+1. **Learnable gating**  
+   → Controls how much retrieved information is added, preventing over-updates  
+
+2. **Embedding normalization (LayerNorm + L2)**  
+   → Improves numerical stability and consistency across retrieval steps  
+
+3. **Separate projections for query / active / inactive**  
+   → Allows more specialized representations for different molecule types  
+
+4. **Learnable temperature (β)**  
+   → Enables adaptive control of Hopfield retrieval sharpness  
+
+5. **Feed-Forward Network (FFN) after retrieval**  
+   → Refines representations similar to Transformer blocks  
+
+6. **Multi-step retrieval**  
+   → Iteratively improves representations instead of a single update  
+
+7. **Top-k memory selection**  
+   → Focuses on the most relevant context molecules, reducing noise  
+
+**Result:**  
+A more **stable, focused, and iterative context retrieval mechanism**, improving representation quality for few-shot learning.
