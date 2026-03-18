@@ -36,3 +36,8 @@ Similarity Module
 Computes predictions via similarity-weighted aggregation of support set labels.
 
 This design ensures efficient, stable, and accurate few-shot predictions by combining retrieval-based memory, attention, and similarity scoring.
+
+References:
+- https://github.com/ml-jku/MHNfs/tree/main/src/mhnfs
+- https://github.com/openai/gpt-oss/blob/main/gpt_oss/torch/model.py
+- https://openreview.net/pdf?id=XrMWUuEevr
