@@ -53,3 +53,29 @@ A more **stable, focused, and iterative context retrieval mechanism**, improving
 ## Similarity Module
 
 It was nothing change at moment.
+
+The original implementation computed similarity between a query and a support set using a simple dot-product, optionally normalized.
+The improved version introduces a multi-head, flexible, and numerically stable similarity computation.
+
+**Changes:**
+1. **Multi-head similarity**
+   → Splits embeddings into multiple heads for richer, parallel similarity comparisons
+2. **Optional learnable linear projections per head**
+   → Allows each head to specialize its representation for better alignment
+3. **Optional L2 normalization**
+   → Stabilizes magnitude differences across embeddings
+4. **Masking support**
+   → Safely ignores padding or inactive support vectors
+5. **Positive / negative weighting**
+   → Adjusts the influence of positive vs negative similarity values
+6. **Top-k similarity selection**
+   → Focuses on the most relevant support vectors, reducing noise
+7. **Aggregation strategies: sum / softmax / log-sum-exp**
+   → Flexible combination of similarities depending on downstream needs
+8. **Temperature scaling**
+   → Controls sensitivity of similarity scores
+9. **Energy interpretation**
+   → Higher similarity → lower “energy”, aligning with Hopfield-style reasoning
+
+**Result:**
+A robust, flexible similarity module suitable for few-shot learning and multi-head embedding comparisons, supporting advanced weighting, masking, and aggregation strategies.
