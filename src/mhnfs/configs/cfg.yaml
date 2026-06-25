@@ -1,0 +1,100 @@
+# ============================================================
+# MHNfs Configuration
+# ============================================================
+
+experiment_name: mhnfs_fsmol
+project_name: MHNfs
+
+# ============================================================
+# System
+# ============================================================
+system:
+  ressources:
+    device: cuda          # change to "cpu" if no GPU available
+    num_workers_cpu: 0    # keep 0 on Windows to avoid multiprocessing issues
+
+  data:
+    path: "/system/user/studentwork/tscheidl/MHNfs/src/data/preprocessed/"
+    dir_training: "training/"
+    dir_validation: "validation/"
+    dir_test: "test/"
+
+    name_mol_ids: "mol_ids.npy"
+    name_target_ids: "task_ids.npy"
+    name_labels: "labels.npy"
+    name_mol_inputs: "mol_inputs.npy"
+    name_dict_mol_smiles_id: "dict_mol_smiles_id.pkl"
+    name_dict_target_id_activeMolecules: "dict_task_id_activeMolecules.pkl"
+    name_dict_target_id_inactiveMolecules: "dict_task_id_inactiveMolecules.pkl"
+    name_dict_target_names_id: "dict_task_names_id.pkl"
+
+# ============================================================
+# Model
+# ============================================================
+model:
+  mol_input_dim: 2248           # fingerprint (2048) + descriptors (200)
+  associationSpace_dim: 128     # internal model dimension
+  context_size: 10841           # number of context memory slots
+
+  training:
+    batch_size: 96
+
+  transformer:
+    activity_embedding_dim: 128  # must match associationSpace_dim
+    ss_dropout: 0.1
+    num_layers: 2
+    number_heads: 8
+
+  encoder:
+    number_hidden_neurons: 512
+    input_dropout: 0.1
+
+  hopfield:
+    num_steps: 1
+    heads: 8
+    beta: 0.044194173824159216  
+    dropout: 0.5
+
+  prediction_scaling: 1.0
+
+  similarityModule:
+    numHeads: 4
+    temperature: 1.0
+    aggregation: "sum"          # sum / softmax / logsumexp
+    scaling: "1/sqrt(N)"              # 1/N or 1/sqrt(N)
+    l2Norm: false
+    posWeight: 1.0
+    negWeight: 1.0
+    topk: null                  # set to integer to use top-k, null to disable
+
+  layerNormBlock:
+    usage: true
+    affine: true
+
+  context:
+    ratio_training_molecules: 0.08
+
+# ============================================================
+# Support set
+# ============================================================
+supportSet:
+  supportSetSize: 16           # fraction of molecules used as support set
+
+# ============================================================
+# Validation / Test
+# ============================================================
+validation:
+  batch_size: 32
+
+test:
+  batch_size: 32
+
+# ============================================================
+# Training
+# ============================================================
+training:
+  seed: 42
+  epochs: 30
+  learning_rate: 0.00018
+  weight_decay: 0.0
+  batch_size: 96
