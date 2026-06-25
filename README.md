@@ -35,8 +35,6 @@ This architecture combines attention, memory retrieval, and similarity learning 
 
 ---
 
-cd path_to_preprocessed_fsmol_data_dir
-
 ### Download (~400 MB compressed, ~5 GB uncompressed)
 gdown https://drive.google.com/uc?id=1SEi8dkkdXudWzRFAYABBckk12tNWfGtX
 
