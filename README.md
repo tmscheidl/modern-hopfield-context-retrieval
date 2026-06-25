@@ -35,6 +35,13 @@ This architecture combines attention, memory retrieval, and similarity learning 
 
 ---
 
+# Move to location where data should be stored
+cd path_to_preprocessed_fsmol_data_dir
+
+# Download and unzip data (~400 MB zipped, ~5 GB unzipped)
+gdown https://drive.google.com/uc?id=1SEi8dkkdXudWzRFAYABBckk12tNWfGtX
+unzip preprocessed_data
+
 References:
 - https://github.com/ml-jku/MHNfs/tree/main/src/mhnfs
 - https://github.com/openai/gpt-oss/blob/main/gpt_oss/torch/model.py
