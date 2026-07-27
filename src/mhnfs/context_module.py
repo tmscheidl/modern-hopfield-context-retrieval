@@ -35,14 +35,15 @@ class ContextModule(nn.Module):
     • Gated residual updates
     """
 
-    def __init__(self, cfg, top_k=32):
+    def __init__(self, cfg, top_k=None):
         super().__init__()
 
         dim = cfg.model.associationSpace_dim
         ffn_mult = 4
 
         self.num_steps = cfg.model.hopfield.num_steps
-        self.top_k = top_k
+        #self.top_k = top_k
+        self.top_k = top_k if top_k is not None else getattr(cfg.model, "context_top_k", 512)
 
         # -------------------------------------------------
         # Hopfield Memory
@@ -52,6 +53,7 @@ class ContextModule(nn.Module):
             num_heads=cfg.model.hopfield.heads,
             init_beta=cfg.model.hopfield.beta,
             attn_dropout=cfg.model.hopfield.dropout,
+            beta_min=getattr(cfg.model.hopfield, "beta_min", 0.001),
         )
         self.hopfield.apply(partial(init_weights, "linear"))
 
@@ -71,8 +73,8 @@ class ContextModule(nn.Module):
         # -------------------------------------------------
         # Normalization
         # -------------------------------------------------
-        self.pre_norm = nn.LayerNorm(dim)
-        self.ffn_norm = nn.LayerNorm(dim)
+        self.pre_norm = nn.LayerNorm(dim, elementwise_affine=False)
+        self.ffn_norm = nn.LayerNorm(dim, elementwise_affine=False)
 
         # -------------------------------------------------
         # Feed Forward Network
