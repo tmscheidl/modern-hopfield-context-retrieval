@@ -42,6 +42,7 @@ class MHNfs(pl.LightningModule):
         # --------------------------------------------------------
         hidden_dim = cfg.model.encoder.number_hidden_neurons
         input_dropout = cfg.model.encoder.input_dropout
+        output_dropout = getattr(cfg.model.encoder, "dropout", 0.5)
         self.input_projection = nn.Sequential(
             nn.Linear(cfg.model.mol_input_dim, hidden_dim),
             nn.GELU(),
@@ -53,10 +54,12 @@ class MHNfs(pl.LightningModule):
         # --------------------------------------------------------
         # Submodules
         # --------------------------------------------------------
-        #self.cross_attention = CrossAttentionModule(cfg)
-        self.cross_attention = CrossAttentionModule(cfg, num_layers=cfg.model.transformer.num_layers)
-        self.context_module = ContextModule(cfg, top_k=64)
-        self.similarity_module = SimilarityModule(cfg, input_dim=dim)
+        self.cross_attention = CrossAttentionModule(cfg)
+        #self.cross_attention = CrossAttentionModule(cfg, num_layers=cfg.model.transformer.num_layers)
+        #self.context_module = ContextModule(cfg, top_k=64)
+        self.context_module = ContextModule(cfg)
+        #self.similarity_module = SimilarityModule(cfg, input_dim=dim)
+        self.similarity_module = SimilarityModule(cfg, input_dim=None)
 
         # --------------------------------------------------------
         # Final model
@@ -66,6 +69,7 @@ class MHNfs(pl.LightningModule):
             context_module=self.context_module,
             similarity_module=self.similarity_module,
             prediction_scaling=cfg.model.prediction_scaling,
+            learnable_scaling=getattr(cfg.model, "learnable_prediction_scaling", False),
         )
 
         # --------------------------------------------------------
@@ -248,6 +252,52 @@ class MHNfs(pl.LightningModule):
             "labels": labels_np,
             "tasks": tasks_np,   # ← add this
         })
+    
+    def test_step(self, batch, batch_idx):
+        logits = self(batch, use_fixed_context=True)
+        labels = batch["label"].float().reshape(-1, 1)
+        loss = self.loss_fn(logits, labels)
+
+        probs = torch.sigmoid(logits).detach().cpu().numpy().reshape(-1)
+        labels_np = labels.detach().cpu().numpy().reshape(-1)
+        tasks_np = batch["taskIdx"].detach().cpu().numpy().reshape(-1)
+
+        self._val_outputs.append({
+            "loss": loss,
+            "probs": probs,
+            "labels": labels_np,
+            "tasks": tasks_np,
+        })
+
+    def on_test_epoch_end(self):
+        # Reuses the same per-task dAUPRC computation as validation,
+        # just logged under test_* names instead of val_*.
+        per_task = {}
+        for o in self._val_outputs:
+            for prob, label, task in zip(o["probs"], o["labels"], o["tasks"]):
+                tid = int(task)
+                per_task.setdefault(tid, {"probs": [], "labels": []})
+                per_task[tid]["probs"].append(prob)
+                per_task[tid]["labels"].append(label)
+
+        import numpy as np
+        from sklearn.metrics import average_precision_score
+
+        dauprc_list = []
+        for tid, d in per_task.items():
+            p = np.array(d["probs"])
+            l = np.array(d["labels"])
+            if l.sum() > 0 and l.sum() < len(l):
+                auprc = average_precision_score(l, p)
+                baseline = l.mean()
+                dauprc_list.append(auprc - baseline)
+
+        dauprc = float(np.mean(dauprc_list)) if dauprc_list else 0.0
+        avg_loss = torch.stack([o["loss"] for o in self._val_outputs]).mean()
+
+        self.log("test_loss", avg_loss, prog_bar=True)
+        self.log("dAUPRC_test", dauprc, prog_bar=True)
+        self._val_outputs = []
 
     def on_validation_epoch_end(self):
         # group by task
@@ -283,33 +333,30 @@ class MHNfs(pl.LightningModule):
     # --------------------------------------------------------
     # Training epoch end
     # --------------------------------------------------------
-    def on_train_epoch_end(self):
-        self.log("dAUPRC_train_val_delta", 0.0)
 
     # --------------------------------------------------------
     # Optimizer
     # --------------------------------------------------------
     def configure_optimizers(self):
-        optimizer = Adam(
+        optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.cfg.training.learning_rate,
             weight_decay=self.cfg.training.weight_decay,
         )
-        # In models.py configure_optimizers(), replace scheduler with:
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode="max",
-            factor=0.5,
-            patience=3,
-            min_lr=1e-6,
-        )
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "monitor": "dAUPRC_val",
-                "interval": "epoch",
-                "frequency": 1,
-                "reduce_on_plateau": True,
-            },
-        }
+        if getattr(self.cfg.training.lr_scheduler, "usage", False):
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                mode="max",
+                factor=getattr(self.cfg.training.lr_scheduler, "factor", 0.5),
+                patience=getattr(self.cfg.training.lr_scheduler, "patience", 5),
+            )
+            
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "monitor": "dAUPRC_val_ma",
+                    "interval": "epoch",
+                },
+            }
+        return optimizer
