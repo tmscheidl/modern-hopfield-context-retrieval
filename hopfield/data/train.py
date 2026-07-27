@@ -19,6 +19,7 @@ from src.mhnfs.models import MHNfs
 @hydra.main(config_path="/system/user/studentwork/tscheidl/MHNfs/src/mhnfs/configs",
             config_name="cfg",
             version_base=None)
+
 def train(cfg):
     """
     Training loop for MHNfs on FS-Mol.
@@ -51,26 +52,41 @@ def train(cfg):
     # --------------------------------------------------------
     # Callbacks
     # --------------------------------------------------------
+    
     checkpoint_dauprc_val = ModelCheckpoint(
-        monitor="dAUPRC_val", mode="max", save_top_k=1
+        monitor="dAUPRC_val",
+        mode="max",
+        save_top_k=1,
+        dirpath="best_checkpoints/v28_retrain",
+        filename="best_raw-{epoch:02d}-{dAUPRC_val:.4f}",
     )
+
+    #checkpoint_dauprc_val = ModelCheckpoint(
+    #    monitor="dAUPRC_val", mode="max", save_top_k=5
+    #)
     checkpoint_dauprc_val_ma = ModelCheckpoint(
-        monitor="dAUPRC_val_ma", mode="max", save_top_k=1
+        monitor="dAUPRC_val_ma",
+        mode="max",
+        save_top_k=1,
+        dirpath="best_checkpoints/v28_retrain",
+        filename="best-{epoch:02d}-{dAUPRC_val_ma:.4f}",
     )
-    checkpoint_dauprc_delta = ModelCheckpoint(
-        monitor="dAUPRC_train_val_delta", mode="min", save_top_k=1
-    )
+
+    #checkpoint_dauprc_val_ma = ModelCheckpoint(
+    #    monitor="dAUPRC_val_ma", mode="max", save_top_k=5
+    #)
+
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
 
     early_stopping = EarlyStopping(
         monitor="dAUPRC_val_ma",
-        patience=10,
+        patience=30,
         mode="max",
     )
 
     early_stopping_raw = EarlyStopping(
         monitor="dAUPRC_val",
-        patience=5,
+        patience=30,
         mode="max",
     )
 
@@ -84,13 +100,12 @@ def train(cfg):
         callbacks=[
             checkpoint_dauprc_val,
             checkpoint_dauprc_val_ma,
-            checkpoint_dauprc_delta,
             lr_monitor,
             early_stopping,
-            EarlyStopping(monitor="dAUPRC_val", patience=5, mode="max"),
+            EarlyStopping(monitor="dAUPRC_val", patience=30, mode="max"),
         ],
         max_epochs=cfg.training.epochs,
-        # accumulate_grad_batches=5,
+        accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         reload_dataloaders_every_n_epochs=1,
     )
 
