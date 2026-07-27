@@ -89,7 +89,7 @@ class SimilarityModule(nn.Module):
         # -------------------------------
         # Similarity computation
         # -------------------------------
-        similarities = torch.matmul(query, support.transpose(-2, -1)) / math.sqrt(d_head)
+        similarities = torch.matmul(query, support.transpose(-2, -1))
 
         # ✅ FIXED: correct temperature scaling
         similarities = similarities / self.temperature
