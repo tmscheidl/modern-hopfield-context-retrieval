@@ -155,10 +155,10 @@ class MyHopfield(nn.Module):
         v = self.split_heads(v)
 
         # Attention scores
-        scores = torch.matmul(q, k.transpose(-2, -1))
 
+        scores = torch.matmul(q, k.transpose(-2, -1))
         beta = self._get_beta()
-        scores = scores * beta / math.sqrt(self.head_dim)
+        scores = scores * beta
 
         scores = self._apply_mask(scores, mask)
 
@@ -210,7 +210,7 @@ class MyHopfield(nn.Module):
         scores = torch.matmul(q, k.transpose(-2, -1))
 
         beta = self._get_beta()
-        scores = scores * beta / math.sqrt(self.head_dim)
+        scores = scores * beta
 
         lse = torch.logsumexp(scores, dim=-1)
         beta_safe = beta.squeeze(-1).clamp(min=1e-6)
@@ -280,7 +280,7 @@ class MyHopfield(nn.Module):
         scores = torch.matmul(q, k.transpose(-2, -1))
 
         beta = self._get_beta()
-        scores = scores * beta / math.sqrt(self.head_dim)
+        scores = scores * beta
 
         scores = self._apply_mask(scores, mask)
 
@@ -317,12 +317,6 @@ class MyHopfield(nn.Module):
 
             nn.init.ones_(self.norm_value.weight)
             nn.init.zeros_(self.norm_value.bias)
-
-        beta_init = torch.empty(self.num_heads).uniform_(0.5, 1.5)
-        beta_param = torch.log(torch.exp(beta_init) - 1)
-
-        with torch.no_grad():
-            self.beta_param.copy_(beta_param)
 
 # For the improvement
         # Optional Multi-Head Hopfield x
