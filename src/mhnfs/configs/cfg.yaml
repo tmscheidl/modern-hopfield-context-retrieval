@@ -33,46 +33,53 @@ system:
 # ============================================================
 model:
   mol_input_dim: 2248           # fingerprint (2048) + descriptors (200)
-  associationSpace_dim: 128     # internal model dimension
+  associationSpace_dim: 1024     # internal model dimension
   context_size: 10841           # number of context memory slots
-
+  context_top_k: 512
   training:
-    batch_size: 96
+    batch_size: 32
 
   transformer:
-    activity_embedding_dim: 128  # must match associationSpace_dim
+    activity_embedding_dim: 64  # must match associationSpace_dim
     ss_dropout: 0.1
-    num_layers: 2
+    num_layers: 1
+    stochastic_depth_prob: 0.0
     number_heads: 8
+    dropout: 0.5
+    dim_forward: 567 # maybe it is no need ?
 
   encoder:
-    number_hidden_neurons: 512
+    number_hidden_neurons: 1024
     input_dropout: 0.1
+    dropout: 0.5
 
   hopfield:
-    num_steps: 1
+    dim_QK: 512   
+    num_steps: 2
     heads: 8
     beta: 0.044194173824159216  
     dropout: 0.5
 
-  prediction_scaling: 1.0
+  prediction_scaling: 0.044194173824159216
+  learnable_prediction_scaling: False
 
   similarityModule:
-    numHeads: 4
+    numHeads: 1
     temperature: 1.0
     aggregation: "sum"          # sum / softmax / logsumexp
-    scaling: "1/sqrt(N)"              # 1/N or 1/sqrt(N)
+    scaling: "1/N"              # 1/N or 1/sqrt(N)
     l2Norm: false
     posWeight: 1.0
     negWeight: 1.0
     topk: null                  # set to integer to use top-k, null to disable
 
+
   layerNormBlock:
     usage: true
-    affine: true
+    affine: false
 
   context:
-    ratio_training_molecules: 0.08
+    ratio_training_molecules: 0.05
 
 # ============================================================
 # Support set
@@ -94,7 +101,13 @@ test:
 # ============================================================
 training:
   seed: 42
-  epochs: 30
-  learning_rate: 0.00018
+  epochs: 9999
+  learning_rate: 0.0001
   weight_decay: 0.0
-  batch_size: 96
+  batch_size: 32
+  accumulate_grad_batches: 16
+  lr_scheduler:
+    usage: true 
+    factor: 0.5
+    patience: 5
+    monitor: dAUPRC_val_ma
