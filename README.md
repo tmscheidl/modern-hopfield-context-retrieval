@@ -1,72 +1,47 @@
-# MHNfs/test — regression + unit tests
+A modular deep learning architecture combining:
 
-## Layout
+- Modern Hopfield Networks
+- Cross-Attention Module
+- Context Module
+- Metric-based similarity Module
 
-```
-MHNfs/
-├── src/
-│   └── metrics/
-│       └── performance_metrics.py   # standalone metric functions (new)
-└── test/
-    ├── conftest.py                  # pytest fixtures
-    ├── test_metrics.py              # unit tests for AUC / dAUPRC math
-    ├── test_model_inference.py      # regression test: model output unchanged
-    ├── generate_test_fixtures.py    # one-time script to create reference data
-    └── assets/
-        ├── test_reference_data/
-        │   ├── model_input_batch.pt     (generated)
-        │   └── model_predictions.pt     (generated)
-        └── mhnfs_data/
-            ├── cfg_snapshot.yaml        (generated)
-            └── reference_checkpoint.ckpt (generated, copy of your chosen checkpoint)
-```
+Designed for few-shot learning, the model makes predictions based on a support set of examples and is tailored to handle active and inactive molecules.
 
-## One-time setup (on the cluster, where data + checkpoints live)
+## Architecture
 
-1. Place `src/metrics/performance_metrics.py` in your source tree.
-2. Refactor `MHNfs.on_validation_epoch_end()` in `models.py` to call
-   `compute_dauprc_score(...)` from that new module instead of computing
-   dAUPRC inline. (Behavior should be identical -- this is a pure refactor
-   for testability.)
-3. Run the fixture generator once, pointing at your best checkpoint
-   (e.g. the v28 run):
+The pipeline consists of four main components:
 
-   ```bash
-   python3 test/generate_test_fixtures.py \
-       checkpoint_path=/absolute/path/to/v28_best.ckpt
-   ```
+### Cross-Attention Module
+- Uses true cross-attention to enable interaction between query and support set.
+- Improves stability and expressiveness with modern attention mechanisms and residual connections.
+- Incorporates task-specific biases for active/inactive molecules.
 
-   This creates all four files under `test/assets/`.
+### Context Module
+- Refines representations through iterative memory retrieval.
+- Focuses on the most relevant support examples.
+- Enhances feature aggregation and stability with gating and normalization.
 
-## Running the tests
+### Hopfield Module
+- Implements a Transformer-like associative memory mechanism.
+- Uses multi-head attention with learnable temperature for flexible retrieval.
+- Extends standard Transformers with energy-based and iterative retrieval.
 
-```bash
-cd /system/user/studentwork/tscheidl/MHNfs
-pytest test/ -v
-```
+### Similarity Module
+- Computes predictions based on similarity between query and support set.
 
-- `test_metrics.py` needs no fixtures/checkpoints -- pure math, runs anywhere,
-  fast.
-- `test_model_inference.py` needs the four generated files above. It loads
-  the frozen checkpoint + frozen batch and asserts predictions still match
-  within `atol=0.01`.
+---
 
-## When to regenerate fixtures
+This architecture combines attention, memory retrieval, and similarity learning to enable stable and effective few-shot predictions for active/inactive molecules.
 
-Only when you deliberately pick a **new** reference/best checkpoint (e.g. you
-find something that beats v28 and want to make that the new baseline).
-Otherwise, if `test_model_inference.py` starts failing, that's the point --
-it means something (a refactor, a library upgrade, an accidental config
-edit) silently changed the model's behavior, and you should find out why
-before trusting any new training numbers.
+---
 
-## Notes on adapting from the professor's original tests
+### Download (~400 MB compressed, ~5 GB uncompressed)
+gdown https://drive.google.com/uc?id=1SEi8dkkdXudWzRFAYABBckk12tNWfGtX
 
-The professor's `conftest.py` / `test_model_inference.py` /
-`test_model_training_class.py` assume a `forward()` signature with several
-positional tensor arguments (query, support actives, support inactives,
-sizes, masks). Our `MHNfs.forward()` takes a single `batch` dict plus
-`use_fixed_context`, so those fixtures and tests were rewritten rather than
-copied directly -- the *pattern* (freeze inputs + outputs from a verified
-checkpoint, assert future runs match) is the same, but the concrete fixture
-shapes and call signatures differ because our model's API differs.
+### Extract files
+unzip preprocessed_data
+
+References:
+- https://github.com/ml-jku/MHNfs/tree/main/src/mhnfs
+- https://github.com/openai/gpt-oss/blob/main/gpt_oss/torch/model.py
+- https://openreview.net/pdf?id=XrMWUuEevr
