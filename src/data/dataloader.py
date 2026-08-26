@@ -2,6 +2,7 @@ import pytorch_lightning as pl
 import numpy as np
 import pickle
 from torch.utils.data import DataLoader
+from sklearn.model_selection import StratifiedShuffleSplit
 
 # Fixed support set size, matching professor's fair few-shot protocol.
 MAX_SUPPORT = 16  # padding/tensor size cap, independent of n_support
@@ -101,32 +102,34 @@ class FSMolDataModule(pl.LightningDataModule):
             active_mols_in_task = list(dataDict["dictTaskidActivemolecules"][task_idx])
             inactive_mols_in_task = list(dataDict["dictTaskidInactivemolecules"][task_idx])
 
-            active_arr = np.array(active_mols_in_task)
-            inactive_arr = np.array(inactive_mols_in_task)
+            # Merge active and inactive
+            all_mols = np.array(active_mols_in_task + inactive_mols_in_task)
+            all_labels = np.array(
+                [1] * len(active_mols_in_task) + [0] * len(inactive_mols_in_task)
+            )
 
-            rng.shuffle(active_arr)
-            rng.shuffle(inactive_arr)
+            # Stratified split: n_support total, stratified by class ratio
+            skf = StratifiedShuffleSplit(
+                n_splits=1,
+                test_size=n_support,
+                random_state=rng.integers(0, 2**31),
+            )
+            query_idx, support_idx = next(skf.split(all_mols, all_labels))
 
-            n_a = min(n_support, len(active_arr))
-            n_i = min(n_support, len(inactive_arr))
-
-            supportSetActivesIds = active_arr[:n_a]
-            supportSetInactivesIds = inactive_arr[:n_i]
-
-            queryActiveIds = active_arr[n_a:]
-            queryInactiveIds = inactive_arr[n_i:]
-
-            query_ids = np.concatenate([queryActiveIds, queryInactiveIds])
-            query_labels = np.concatenate([
-                np.ones(len(queryActiveIds)),
-                np.zeros(len(queryInactiveIds)),
-            ])
+            support_ids = all_mols[support_idx]
+            support_labels = all_labels[support_idx]
+            query_ids = all_mols[query_idx]
+            query_labels = all_labels[query_idx]
 
             dataDict["query_molIds"] += list(query_ids)
             dataDict["query_taskIds"] += list(np.repeat(task_idx, len(query_ids)))
             dataDict["query_labels"] += list(query_labels)
-            dataDict["supportSetActives"][task_idx] = list(supportSetActivesIds)
-            dataDict["supportSetInactives"][task_idx] = list(supportSetInactivesIds)
+            dataDict["supportSetActives"][task_idx] = list(
+                support_ids[support_labels == 1]
+            )
+            dataDict["supportSetInactives"][task_idx] = list(
+                support_ids[support_labels == 0]
+            )
 
         return dataDict
 
@@ -173,19 +176,23 @@ class FSMolDataModule(pl.LightningDataModule):
             return self.len
 
         def fixed_count_sampling_train(self, active_mols_in_task, inactive_mols_in_task):
-            active_arr = np.array(active_mols_in_task)
-            inactive_arr = np.array(inactive_mols_in_task)
+            # Merge active and inactive
+            all_mols = np.array(active_mols_in_task + inactive_mols_in_task)
+            all_labels = np.array(
+                [1] * len(active_mols_in_task) + [0] * len(inactive_mols_in_task)
+            )
 
-            if len(active_arr) > 0:
-                np.random.shuffle(active_arr)
-            if len(inactive_arr) > 0:
-                np.random.shuffle(inactive_arr)
+            n_support = int(self.config.supportSet.supportSetSize)
 
-            n_a = min(self.n_support, len(active_arr))
-            n_i = min(self.n_support, len(inactive_arr))
+            # Stratified split: n_support total, stratified by class ratio
+            skf = StratifiedShuffleSplit(n_splits=1, test_size=n_support)
+            _, support_idx = next(skf.split(all_mols, all_labels))
 
-            supportSetActivesIds = active_arr[:n_a]
-            supportSetInactivesIds = inactive_arr[:n_i]
+            support_ids = all_mols[support_idx]
+            support_labels = all_labels[support_idx]
+
+            supportSetActivesIds = support_ids[support_labels == 1]
+            supportSetInactivesIds = support_ids[support_labels == 0]
 
             supportSetActives = self.database["molInputs"][supportSetActivesIds, :]
             supportSetInactives = self.database["molInputs"][supportSetInactivesIds, :]
