@@ -295,6 +295,11 @@ class MHNfs(pl.LightningModule):
         dauprc = float(np.mean(dauprc_list)) if dauprc_list else 0.0
         avg_loss = torch.stack([o["loss"] for o in self._val_outputs]).mean()
 
+        if dauprc_list:
+            _arr = np.array(dauprc_list)
+            _std = float(_arr.std())
+            _se = _std / len(_arr)
+            print(f"\nTest dAUPRC: {dauprc:.4f} +/- {_se:.6f} (SE={_se:.6f}, std={_std:.4f}, N={len(dauprc_list)} tasks)")
         self.log("test_loss", avg_loss, prog_bar=True)
         self.log("dAUPRC_test", dauprc, prog_bar=True)
         self._val_outputs = []
