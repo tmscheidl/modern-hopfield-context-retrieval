@@ -131,44 +131,33 @@ class ContextModule(nn.Module):
     # Single retrieval step
     # -------------------------------------------------
     def retrieval_step(self, query, sa, si, context):
-
         # select top-k memory
         context_topk = self.topk_context(query, context)
-
         # projections
         q_proj = self.query_proj(query)
         sa_proj = self.active_proj(sa)
         si_proj = self.inactive_proj(si)
-
         # combine states
         s = torch.cat((q_proj, sa_proj, si_proj), dim=1)
-
         # Hopfield retrieval
         s_h = self.hopfield(
             query=s,
             key=context_topk,
             value=context_topk,
         )
-
         # split states
         q_h = s_h[:, 0:1]
         sa_h = s_h[:, 1:1 + sa_proj.shape[1]]
         si_h = s_h[:, 1 + sa_proj.shape[1]:]
-
         # gates
         q_gate = torch.sigmoid(self.query_gate).view(1, 1, -1)
         s_gate = torch.sigmoid(self.support_gate).view(1, 1, -1)
-
         # residual updates
         query = query + q_gate * (q_h - q_proj)
         sa = sa + s_gate * (sa_h - sa_proj)
         si = si + s_gate * (si_h - si_proj)
-
         return query, sa, si
 
-    # -------------------------------------------------
-    # Transformer FFN block
-    # -------------------------------------------------
     def ffn_block(self, x):
         x_norm = self.ffn_norm(x)
         return x + self.ffn(x_norm)
