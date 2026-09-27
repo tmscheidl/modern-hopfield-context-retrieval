@@ -23,12 +23,13 @@ MOL_INPUTS_PATH = "/system/user/studentwork/tscheidl/MHNfs/src/data/preprocessed
 class MHNfs(pl.LightningModule):
     """
     MHNfs: Modern Hopfield Network for few-shot molecular activity prediction.
-    Wraps CrossAttentionModule + ContextModule + SimilarityModule into a
-    PyTorch Lightning module for training on FS-Mol.
 
-    Context set follows the paper:
-    - Training: randomly sample 5% of training molecules per batch
-    - Validation/Test: fixed 5% subset (same seed)
+    Combines the Cross-Attention, Context, and Similarity modules and
+    provides the training, validation, and test logic using PyTorch Lightning.
+
+    Context set:
+    - Training: randomly sampled from the training molecules
+    - Validation/Test: fixed context subset using the same random seed
     """
 
     def __init__(self, cfg):
@@ -38,8 +39,10 @@ class MHNfs(pl.LightningModule):
         dim = cfg.model.associationSpace_dim
 
         # --------------------------------------------------------
-        # Input projection: mol_inputs (2248-dim) -> model dim
+        # Input projection: molecular features -> model dimension
         # --------------------------------------------------------
+        # Project the input molecular representation into the model's
+        # association space used by the subsequent modules.
         hidden_dim = cfg.model.encoder.number_hidden_neurons
         input_dropout = cfg.model.encoder.input_dropout
         output_dropout = getattr(cfg.model.encoder, "dropout", 0.5)
@@ -64,6 +67,7 @@ class MHNfs(pl.LightningModule):
         # --------------------------------------------------------
         # Final model
         # --------------------------------------------------------
+        # Combine the three main processing modules into the final model.
         self.model = MHNfsFinalModel(
             cross_attention=self.cross_attention,
             context_module=self.context_module,
@@ -74,7 +78,7 @@ class MHNfs(pl.LightningModule):
 
         # --------------------------------------------------------
         # Load all training molecules into CPU memory once
-        # Context is sampled from this on each batch
+        # Context is sampled from this set during training
         # --------------------------------------------------------
         self._mol_inputs_all = torch.tensor(
             np.load(MOL_INPUTS_PATH),
@@ -85,8 +89,8 @@ class MHNfs(pl.LightningModule):
         self._n_context = int(cfg.model.context.ratio_training_molecules * n_total)
 
         # --------------------------------------------------------
-        # Fixed context for validation/test (same seed as paper)
-        # Pre-compute once and store
+        # Fixed context for validation/test
+        # Pre-compute once using a fixed random seed
         # --------------------------------------------------------
         rng = np.random.default_rng(42)
         fixed_idx = rng.choice(n_total, size=self._n_context, replace=False)
@@ -96,8 +100,10 @@ class MHNfs(pl.LightningModule):
         )
 
         # --------------------------------------------------------
-        # Placeholder context embedding (will be set in forward)
+        # Placeholder for context embedding
         # --------------------------------------------------------
+        # Kept for compatibility; the context embedding is created
+        # directly when the forward pass is executed.
         self.context_embedding = None
 
         # --------------------------------------------------------
@@ -114,18 +120,23 @@ class MHNfs(pl.LightningModule):
         self._train_context_emb = None
 
     # --------------------------------------------------------
-    # Called from train.py before training — no-op now since
-    # context is handled per-batch in forward()
+    # Context set update
     # --------------------------------------------------------
+    # Kept for compatibility with train.py.
+    # Context is now handled directly inside forward().
     def _update_context_set_embedding(self):
         pass
 
     # --------------------------------------------------------
-    # Sample random context for one batch (training)
+    # Sample random context for one batch
     # --------------------------------------------------------
     def _get_fresh_train_context(self):
+        # Randomly select the configured number of context molecules.
         idx = torch.randperm(len(self._mol_inputs_all))[:self._n_context]
         context_raw = self._mol_inputs_all[idx].to(self.device)
+
+        # Context representations do not need gradients because the
+        # context set is only used as a memory for retrieval.
         with torch.no_grad():
             return self.input_projection(context_raw)
 
@@ -133,21 +144,27 @@ class MHNfs(pl.LightningModule):
     # Get fixed context for validation/test
     # --------------------------------------------------------
     def _get_fixed_context(self):
+        # Move the fixed context set to the current device.
         context_raw = self._fixed_context_raw.to(self.device)  # [n_context, 2248]
+
+        # Convert the fixed molecular features into model representations.
         with torch.no_grad():
             context_emb = self.input_projection(context_raw)  # [n_context, dim]
+
         return context_emb
 
     # --------------------------------------------------------
     # Forward
     # --------------------------------------------------------
     def forward(self, batch, use_fixed_context=False):
+        # Project query and both support sets into the model dimension.
         query = self.input_projection(batch["queryMolecule"])
         actives = self.input_projection(batch["supportSetActives"])
         inactives = self.input_projection(batch["supportSetInactives"])
 
-        # Use precomputed masks if available (training with dropout)
-        # otherwise compute fresh masks (validation)
+        # Use precomputed masks when available, for example after
+        # support-set dropout during training.
+        # Otherwise, create masks from the actual support-set sizes.
         if "_act_mask" in batch:
             act_mask = batch["_act_mask"]
             inact_mask = batch["_inact_mask"]
@@ -162,13 +179,17 @@ class MHNfs(pl.LightningModule):
         B, Na, _ = actives.shape
         _, Ni, _ = inactives.shape
 
+        # Use a fixed context during validation/test and a newly sampled
+        # context during training.
         if use_fixed_context:
             context_emb = self._get_fixed_context()
         else:
             context_emb = self._get_fresh_train_context()
 
+        # Expand the shared context set to match the batch dimension.
         context = context_emb.unsqueeze(0).expand(B, -1, -1)
 
+        # Run the complete MHNfs model.
         logits = self.model(
             query=query,
             support_actives=actives,
@@ -180,17 +201,17 @@ class MHNfs(pl.LightningModule):
         return logits
 
     def on_train_epoch_start(self):
-        """Resample context at the start of each training epoch."""
+        """Sample a new context set at the start of each training epoch."""
         idx = torch.randperm(len(self._mol_inputs_all))[:self._n_context]
         context_raw = self._mol_inputs_all[idx].to(self.device)
         with torch.no_grad():
             self._train_context_emb = self.input_projection(context_raw)
 
     # --------------------------------------------------------
-    # Training step — random context per batch
+    # Training step
     # --------------------------------------------------------
     def training_step(self, batch, batch_idx):
-        # Build masks
+        # Build masks from the number of valid active and inactive supports.
         act_size = batch["supportSetActivesSize"]
         inact_size = batch["supportSetInactivesSize"]
         B = act_size.shape[0]
@@ -200,22 +221,24 @@ class MHNfs(pl.LightningModule):
         act_mask = torch.arange(Na, device=self.device).unsqueeze(0) < act_size.unsqueeze(1)
         inact_mask = torch.arange(Ni, device=self.device).unsqueeze(0) < inact_size.unsqueeze(1)
 
-        # Support set dropout — randomly mask additional molecules during training
-        # In training_step, replace the dropout masking block with this:
+        # Randomly remove additional support molecules during training
+        # to regularize the model and make it robust to smaller support sets.
         ss_dropout = self.cfg.model.transformer.ss_dropout
         act_dropout_mask = torch.rand(act_mask.shape, device=self.device) < ss_dropout
         inact_dropout_mask = torch.rand(inact_mask.shape, device=self.device) < ss_dropout
         act_mask_dropped = act_mask & ~act_dropout_mask
         inact_mask_dropped = inact_mask & ~inact_dropout_mask
 
-        # Guarantee at least 1 valid active and 1 valid inactive per sample
+        # Guarantee at least one valid active and one valid inactive
+        # support molecule for every sample.
         for b in range(act_mask.shape[0]):
             if act_mask_dropped[b].sum() == 0:
-                # restore a random valid one
+                # Restore one randomly selected valid active molecule.
                 valid_idx = act_mask[b].nonzero(as_tuple=True)[0]
                 if len(valid_idx) > 0:
                     act_mask_dropped[b, valid_idx[torch.randint(len(valid_idx),(1,))]] = True
             if inact_mask_dropped[b].sum() == 0:
+                # Restore one randomly selected valid inactive molecule.
                 valid_idx = inact_mask[b].nonzero(as_tuple=True)[0]
                 if len(valid_idx) > 0:
                     inact_mask_dropped[b, valid_idx[torch.randint(len(valid_idx),(1,))]] = True
@@ -223,25 +246,31 @@ class MHNfs(pl.LightningModule):
         act_mask = act_mask_dropped
         inact_mask = inact_mask_dropped
 
-        # Store masks in batch for forward
+        # Store the dropout masks so that forward() uses the same masks.
         batch["_act_mask"] = act_mask
         batch["_inact_mask"] = inact_mask
 
+        # Run the model using a freshly sampled training context.
         logits = self(batch, use_fixed_context=False)
+
+        # Prepare labels and apply label smoothing during training.
         labels = batch["label"].float().reshape(-1, 1)
         labels_smoothed = labels * 0.9 + 0.05
         loss = self.loss_fn(logits, labels_smoothed)
+
         self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         return loss
 
     # --------------------------------------------------------
-    # Validation step — fixed context
+    # Validation step
     # --------------------------------------------------------
     def validation_step(self, batch, batch_idx):
+        # Use the fixed context set during validation.
         logits = self(batch, use_fixed_context=True)
         labels = batch["label"].float().reshape(-1, 1)
         loss = self.loss_fn(logits, labels)
 
+        # Store predictions, labels, and task IDs for per-task dAUPRC calculation.
         probs    = torch.sigmoid(logits).detach().cpu().numpy().reshape(-1)
         labels_np = labels.detach().cpu().numpy().reshape(-1)
         tasks_np  = batch["taskIdx"].detach().cpu().numpy().reshape(-1)  # ← add this
@@ -250,14 +279,16 @@ class MHNfs(pl.LightningModule):
             "loss": loss,
             "probs": probs,
             "labels": labels_np,
-            "tasks": tasks_np,   # ← add this
+            "tasks": tasks_np,
         })
     
     def test_step(self, batch, batch_idx):
+        # Use the same fixed context as validation.
         logits = self(batch, use_fixed_context=True)
         labels = batch["label"].float().reshape(-1, 1)
         loss = self.loss_fn(logits, labels)
 
+        # Store predictions, labels, and task IDs for per-task dAUPRC calculation.
         probs = torch.sigmoid(logits).detach().cpu().numpy().reshape(-1)
         labels_np = labels.detach().cpu().numpy().reshape(-1)
         tasks_np = batch["taskIdx"].detach().cpu().numpy().reshape(-1)
@@ -270,8 +301,8 @@ class MHNfs(pl.LightningModule):
         })
 
     def on_test_epoch_end(self):
-        # Reuses the same per-task dAUPRC computation as validation,
-        # just logged under test_* names instead of val_*.
+        # Group predictions and labels by task so that dAUPRC
+        # is calculated separately for each test task.
         per_task = {}
         for o in self._val_outputs:
             for prob, label, task in zip(o["probs"], o["labels"], o["tasks"]):
@@ -283,6 +314,9 @@ class MHNfs(pl.LightningModule):
         import numpy as np
         from sklearn.metrics import average_precision_score
 
+        # Calculate dAUPRC for each task.
+        # Tasks containing only one class are excluded because AUPRC
+        # is not meaningful for those tasks.
         dauprc_list = []
         for tid, d in per_task.items():
             p = np.array(d["probs"])
@@ -292,20 +326,28 @@ class MHNfs(pl.LightningModule):
                 baseline = l.mean()
                 dauprc_list.append(auprc - baseline)
 
+        # Average the task-level dAUPRC values.
         dauprc = float(np.mean(dauprc_list)) if dauprc_list else 0.0
+
+        # Average the loss across all test batches.
         avg_loss = torch.stack([o["loss"] for o in self._val_outputs]).mean()
 
         if dauprc_list:
+            # Calculate the standard deviation and standard error
+            # across the task-level dAUPRC values.
             _arr = np.array(dauprc_list)
             _std = float(_arr.std())
             _se = _std / len(_arr)
             print(f"\nTest dAUPRC: {dauprc:.4f} +/- {_se:.6f} (SE={_se:.6f}, std={_std:.4f}, N={len(dauprc_list)} tasks)")
+
         self.log("test_loss", avg_loss, prog_bar=True)
         self.log("dAUPRC_test", dauprc, prog_bar=True)
+
+        # Clear stored outputs before the next evaluation.
         self._val_outputs = []
 
     def on_validation_epoch_end(self):
-        # group by task
+        # Group predictions and labels by task before calculating dAUPRC.
         per_task = {}
         for o in self._val_outputs:
             for prob, label, task in zip(o["probs"], o["labels"], o["tasks"]):
@@ -314,7 +356,8 @@ class MHNfs(pl.LightningModule):
                 per_task[tid]["probs"].append(prob)
                 per_task[tid]["labels"].append(label)
 
-        # compute dAUPRC per task, then average
+        # Calculate dAUPRC for each validation task and then average
+        # the task-level values.
         dauprc_list = []
         for tid, d in per_task.items():
             p = np.array(d["probs"])
@@ -326,13 +369,19 @@ class MHNfs(pl.LightningModule):
 
         dauprc = float(np.mean(dauprc_list)) if dauprc_list else 0.0
 
+        # Calculate the average validation loss.
         avg_loss = torch.stack([o["loss"] for o in self._val_outputs]).mean()
+
+        # Store the current dAUPRC and calculate a moving average
+        # over the most recent validation epochs.
         self._val_dauprc_history.append(dauprc)
         dauprc_ma = np.mean(self._val_dauprc_history[-10:])
 
         self.log("val_loss", avg_loss, prog_bar=True)
         self.log("dAUPRC_val", dauprc, prog_bar=True)
         self.log("dAUPRC_val_ma", dauprc_ma, prog_bar=True)
+
+        # Clear stored validation outputs before the next epoch.
         self._val_outputs = []
 
     # --------------------------------------------------------
@@ -343,11 +392,14 @@ class MHNfs(pl.LightningModule):
     # Optimizer
     # --------------------------------------------------------
     def configure_optimizers(self):
+        # AdamW optimizer with the configured learning rate and weight decay.
         optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.cfg.training.learning_rate,
             weight_decay=self.cfg.training.weight_decay,
         )
+
+        # Optionally reduce the learning rate when validation performance
         if getattr(self.cfg.training.lr_scheduler, "usage", False):
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer,
@@ -364,4 +416,5 @@ class MHNfs(pl.LightningModule):
                     "interval": "epoch",
                 },
             }
+
         return optimizer
