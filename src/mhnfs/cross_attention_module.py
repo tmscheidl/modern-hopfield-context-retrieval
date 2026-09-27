@@ -5,6 +5,8 @@ import torch.nn.functional as F
 
 
 def init_weights(module):
+    # Initialize linear layers with Xavier initialization.
+    # Biases are initialized to zero.
     if isinstance(module, nn.Linear):
         nn.init.xavier_uniform_(module.weight)
         if module.bias is not None:
@@ -26,6 +28,7 @@ class RMSNorm(nn.Module):
         self.eps = eps
 
     def forward(self, x):
+        # Normalize each token representation by its root mean square.
         rms = x.pow(2).mean(dim=-1, keepdim=True)
         x = x * torch.rsqrt(rms + self.eps)
         return x * self.weight
@@ -33,27 +36,33 @@ class RMSNorm(nn.Module):
 
 class ActivityEncoding(nn.Module):
     """
-    V24 change (from professor's design): additive CONSTANT encoding
-    instead of a learned type embedding. query gets 0, actives get +1,
-    inactives get -1, broadcast across the embedding dimension.
-    This is fixed, not learned - simpler, and a genuinely different
-    mechanism than the InputEmbedding type-embedding used previously.
+    Fixed activity encoding for distinguishing query and support molecules.
+
+    The query receives 0, active molecules receive +1, and inactive
+    molecules receive -1. The encoding is added directly to the
+    representations and is not learned.
     """
 
     def forward(self, query, actives, inactives):
+        # Keep the query unchanged.
         query = query + 0.0  # explicit no-op for clarity, query stays at 0
+
+        # Add a positive constant to active support molecules.
         actives = actives + torch.ones_like(actives)
+
+        # Add a negative constant to inactive support molecules.
         inactives = inactives - torch.ones_like(inactives)
+
         return query, actives, inactives
 
 
 class UnifiedSelfAttention(nn.Module):
     """
-    V24 change (from professor's design): ONE self-attention over the
-    concatenated [query, actives, inactives] sequence, governed by a
-    single padding mask. Replaces the previous split active/inactive
-    cross-attention with separate scaling paths. Query can now also
-    attend to itself and the full set, not just support molecules.
+    Self-attention over the complete query and support sequence.
+
+    The input sequence contains the query, active supports, and inactive
+    supports. A single padding mask prevents padded support positions
+    from being used as keys during attention.
     """
 
     def __init__(self, config, attn_dropout=0.1):
@@ -62,51 +71,68 @@ class UnifiedSelfAttention(nn.Module):
         self.head_dim = config.head_dim
         self.attn_dropout = attn_dropout
 
+        # Project the input representations into queries, keys, and values.
         self.q_proj = nn.Linear(config.n_embd, config.n_embd)
         self.k_proj = nn.Linear(config.n_embd, config.n_embd)
         self.v_proj = nn.Linear(config.n_embd, config.n_embd)
         self.out_proj = nn.Linear(config.n_embd, config.n_embd)
 
+        # Learnable attention temperature controlling the attention scale.
         self.log_temp = nn.Parameter(torch.log(torch.tensor(1.0)))
 
     def forward(self, x, padding_mask):
         """
-        x: [B, T, D]  (T = 1 + Na + Ni, query + actives + inactives)
-        padding_mask: [B, T] bool, True = valid (real) molecule
+        x: [B, T, D]
+           T = query + active supports + inactive supports
+
+        padding_mask: [B, T]
+           True = valid molecule, False = padding
         """
         B, T, D = x.shape
 
+        # Create query, key, and value representations.
         q = self.q_proj(x)
         k = self.k_proj(x)
         v = self.v_proj(x)
 
+        # Split the embedding dimension into multiple attention heads.
         q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
+        # Scale queries using the learned temperature.
         temp = torch.exp(self.log_temp).clamp(0.1, 10)
         q = q / (math.sqrt(self.head_dim) * temp)
 
-        # single unified mask: [B, 1, 1, T] -> broadcasts over query positions too
+        # Create one mask for the complete sequence.
+        # Padded molecules receive -inf so they cannot contribute to attention.
         key_mask = padding_mask.unsqueeze(1).unsqueeze(2)  # [B,1,1,T]
         attn_bias = torch.zeros(B, 1, 1, T, device=x.device)
         attn_bias = attn_bias.masked_fill(~key_mask, float('-inf'))
 
+        # Apply self-attention over the complete query/support sequence.
+        # Dropout is only active during training.
         #out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_bias)
         out = F.scaled_dot_product_attention(
             q, k, v, attn_mask=attn_bias,
             dropout_p=self.attn_dropout if self.training else 0.0
         )
 
+        # Merge the attention heads back into the original embedding dimension.
         out = out.transpose(1, 2).contiguous().reshape(B, T, D)
+
+        # Project the combined representation back to the model dimension.
         return self.out_proj(out)
 
 
 class TransformerBlock(nn.Module):
     """
-    Kept the same overall shape (RMSNorm, gated residual, FFN) -
-    only the attention mechanism inside changed (UnifiedSelfAttention
-    instead of the previous split active/inactive cross-attention).
+    Transformer-style block containing:
+    - RMS normalization
+    - unified self-attention
+    - gated residual connection
+    - feed-forward network
+    - gated FFN residual connection
     """
 
     def __init__(self, config):
@@ -124,31 +150,35 @@ class TransformerBlock(nn.Module):
             nn.Dropout(0.5),
         )
 
+        # Start with a small residual contribution from both attention and FFN.
         self.gate_attn = nn.Parameter(torch.tensor(-4.0))  # sigmoid ≈ 0.018
         self.gate_ffn = nn.Parameter(torch.tensor(-4.0))   # sigmoid ≈ 0.018
 
     def forward(self, x, padding_mask):
+        # Normalize the input before self-attention.
         delta = self.attn(self.x_norm(x), padding_mask)
+
+        # Normalize the attention output before applying the residual update.
         delta = self.delta_norm(delta)
+
+        # Add the attention update through a learnable residual gate.
         x = x + torch.sigmoid(self.gate_attn) * delta
+
+        # Apply the FFN and add its output through a separate residual gate.
         x = x + torch.sigmoid(self.gate_ffn) * self.ffn(self.ffn_norm(x))
+
         return x
 
 
 class CrossAttentionModule(nn.Module):
     """
-    V24 changes:
-    1. Unified self-attention (professor-style) instead of split active/
-       inactive cross-attention - kept inside the existing transformer
-       block shape (RMSNorm, gating, FFN unchanged in spirit).
-    2. Additive constant activity encoding (professor-style) instead of
-       a learned type embedding.
-    3. Module-level residual gate: the whole cross-attention module's
-       effect can be downweighted by a learnable gate, giving the model
-       an "escape hatch" if cross-attention isn't helping for a given
-       batch.
-    4. Stochastic depth: when stacking multiple blocks, randomly skip
-       later blocks during training (never at eval) as a regularizer.
+    Transformer-style module for interaction between the query and support set.
+
+    The module:
+    - uses unified self-attention over query and support molecules
+    - adds fixed activity information to distinguish active and inactive supports
+    - uses a module-level residual gate
+    - optionally applies stochastic depth to later Transformer blocks
     """
 
     def __init__(self, cfg):
@@ -162,10 +192,13 @@ class CrossAttentionModule(nn.Module):
 
         config = GPTConfig(n_embd=self.model_dim, n_head=num_heads)
 
+        # Add fixed activity information to the query and support representations.
         self.activity_encoding = ActivityEncoding()
+
+        # Stack multiple Transformer blocks for query-support interaction.
         self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(num_layers)])
 
-        # module-level residual gate (point 3 above)
+        # Controls the overall contribution of the Cross-Attention Module.
         self.module_gate = nn.Parameter(torch.tensor(-4.0))
 
         self.apply(init_weights)
@@ -173,30 +206,38 @@ class CrossAttentionModule(nn.Module):
     def forward(self, query, actives, inactives, act_mask, inact_mask):
         B = query.size(0)
 
-        # save originals for the module-level residual
+        # Keep the original representations for the final module-level residual.
         query_in, actives_in, inactives_in = query, actives, inactives
 
-        # additive constant activity encoding (point 2 above)
+        # Add fixed information indicating whether each support molecule
+        # is active or inactive.
         query, actives, inactives = self.activity_encoding(query, actives, inactives)
 
         n_actives = actives.size(1)
         n_inactives = inactives.size(1)
 
+        # Combine query and both support groups into one sequence.
         x = torch.cat([query, actives, inactives], dim=1)
 
+        # The query is always valid, while support validity is given by
+        # the active and inactive masks.
         query_mask = torch.ones(B, 1, dtype=torch.bool, device=query.device)
         padding_mask = torch.cat([query_mask, act_mask, inact_mask], dim=1)
 
+        # Process the complete sequence through the Transformer blocks.
         for i, block in enumerate(self.blocks):
+            # During training, later blocks can be randomly skipped
+            # as a form of stochastic-depth regularization.
             if self.training and i > 0 and torch.rand(1).item() < self.stochastic_depth_prob:
                 continue  # skip this block this forward pass (stochastic depth)
             x = block(x, padding_mask)
 
+        # Split the sequence back into query, active, and inactive representations.
         query_out = x[:, 0:1, :]
         actives_out = x[:, 1:1 + n_actives, :]
         inactives_out = x[:, 1 + n_actives:1 + n_actives + n_inactives, :]
 
-        # module-level residual gate (point 3 above)
+        # Apply the complete module update through a learnable residual gate.
         gate = torch.sigmoid(self.module_gate)
         query_out = query_in + gate * (query_out - query_in)
         actives_out = actives_in + gate * (actives_out - actives_in)
