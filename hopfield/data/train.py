@@ -7,8 +7,10 @@ import sys
 os.environ["WANDB_MODE"] = "disabled"
 
 # ============================================================
-# Add project root to path so src.* imports work
+# Project setup
 # ============================================================
+# Add the project root to the Python path so that src.* modules
+# can be imported when the training script is executed.
 PROJECT_ROOT = "/system/user/studentwork/tscheidl/MHNfs"
 sys.path.insert(0, PROJECT_ROOT)
 
@@ -24,25 +26,29 @@ def train(cfg):
     """
     Training loop for MHNfs on FS-Mol.
     """
-    # Set seed
+    # Set the random seed for reproducible training.
     seed_everything(cfg.training.seed)
 
-    # Load data module
+    # Initialize the FS-Mol data module.
+    # This handles loading and preparing the training, validation,
+    # and test data.
     dm = FSMolDataModule(cfg)
 
-    # Load model
+    # Initialize the MHNfs model using the configuration.
     model = MHNfs(cfg)
 
-    # Move model to device
+    # Move the model to the configured device (GPU or CPU).
     device = cfg.system.ressources.device
     model = model.to(device)
 
     # --------------------------------------------------------
-    # Logger (wandb)
+    # Experiment logging
     # --------------------------------------------------------
+    # Store experiment logs in the project log directory.
     log_dir = os.path.join(PROJECT_ROOT, "logs")
     os.makedirs(log_dir, exist_ok=True)
 
+    # Initialize the Weights & Biases logger for experiment tracking.
     logger = pl_loggers.WandbLogger(
         save_dir=log_dir,
         name=cfg.experiment_name,
@@ -50,40 +56,53 @@ def train(cfg):
     )
 
     # --------------------------------------------------------
-    # Callbacks
+    # Training callbacks
     # --------------------------------------------------------
     
+    # Save the checkpoint with the highest validation dAUPRC.
     checkpoint_dauprc_val = ModelCheckpoint(
         monitor="dAUPRC_val",
         mode="max",
         save_top_k=1,
-        dirpath="best_checkpoints/v28_retrain",
+        dirpath="best_checkpoints/runB6_16shot",
         filename="best_raw-{epoch:02d}-{dAUPRC_val:.4f}",
     )
 
+    # Alternative checkpoint configuration that would save
+    # multiple checkpoints based on raw validation dAUPRC.
     #checkpoint_dauprc_val = ModelCheckpoint(
     #    monitor="dAUPRC_val", mode="max", save_top_k=5
     #)
+    
+    # Save the checkpoint with the highest moving-average
+    # validation dAUPRC.
     checkpoint_dauprc_val_ma = ModelCheckpoint(
         monitor="dAUPRC_val_ma",
         mode="max",
         save_top_k=1,
-        dirpath="best_checkpoints/v28_retrain",
+        dirpath="best_checkpoints/runB6_16shot",
         filename="best-{epoch:02d}-{dAUPRC_val_ma:.4f}",
     )
 
+    # Alternative checkpoint configuration that would save
+    # multiple checkpoints based on the moving-average metric.
     #checkpoint_dauprc_val_ma = ModelCheckpoint(
     #    monitor="dAUPRC_val_ma", mode="max", save_top_k=5
     #)
 
+    # Track the learning rate after each training epoch.
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
 
+    # Stop training if the moving-average validation dAUPRC
+    # does not improve for 30 epochs.
     early_stopping = EarlyStopping(
         monitor="dAUPRC_val_ma",
         patience=30,
         mode="max",
     )
 
+    # Stop training based on the raw validation dAUPRC
+    # if it does not improve for 30 epochs.
     early_stopping_raw = EarlyStopping(
         monitor="dAUPRC_val",
         patience=30,
@@ -91,8 +110,10 @@ def train(cfg):
     )
 
     # --------------------------------------------------------
-    # Trainer
+    # PyTorch Lightning trainer
     # --------------------------------------------------------
+    # Configure the training process, including the device,
+    # callbacks, number of epochs, and gradient accumulation.
     trainer = pl.Trainer(
         accelerator="gpu" if device == "cuda" else "cpu",
         devices=1,
@@ -110,10 +131,13 @@ def train(cfg):
     )
 
     # --------------------------------------------------------
-    # Train
+    # Start training
     # --------------------------------------------------------
+    # Start the training process using the MHNfs model and
+    # the FS-Mol data module.
     trainer.fit(model, dm)
 
 
 if __name__ == "__main__":
+    # Run the training function when this file is executed directly.
     train()
